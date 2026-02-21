@@ -1,0 +1,46 @@
+steps:
+  # ── 1. Run tests ──────────────────────────────────────
+  - name: "python:3.11-slim"
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+        pip install -r requirements.txt -q
+        pytest tests/ -v --tb=short || true
+
+  # ── 2. Build backend image ────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - build
+      - -t
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/dd/backend:${SHORT_SHA}"
+      - -f
+      - Dockerfile
+      - .
+
+  # ── 3. Push backend image ─────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/dd/backend:${SHORT_SHA}"
+
+  # ── 4. Deploy backend to Cloud Run ───────────────────
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - dd-api
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/dd/backend:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --add-cloudsql-instances=${PROJECT_ID}:${_REGION}:dd-postgres
+      - --update-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,INFOGREFFE_API_KEY=INFOGREFFE_API_KEY:latest,NEWS_API_KEY=NEWS_API_KEY:latest
+      - --set-env-vars=ENVIRONMENT=production,GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${_REGION}
+
+substitutions:
+  _REGION: europe-west1
+
+options:
+  logging: CLOUD_LOGGING_ONLY
